@@ -5,9 +5,13 @@
 //
 //   node server.js            serve ./music on http://127.0.0.1:8888
 //   MUSIC_DIR=~/Music node server.js
-//   PORT=9000 HOST=0.0.0.0 node server.js   (expose on your LAN — optional)
+//   HOST=0.0.0.0 node server.js             expose beyond localhost (auth
+//                                           turns on automatically)
+//   TLS_CERT=cert.pem TLS_KEY=key.pem ...   serve HTTPS directly
+// See README "Sharing outside your network" for tunnels / reverse proxies.
 
 const http = require('http');
+const https = require('https');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
@@ -16,12 +20,17 @@ const { URL } = require('url');
 const { Library } = require('./lib/scanner');
 const { Store } = require('./lib/store');
 const { readTags } = require('./lib/tags');
+const { Auth, generatePassword } = require('./lib/auth');
 
 const ROOT = __dirname;
 const MUSIC_DIR = path.resolve(expandHome(process.env.MUSIC_DIR || path.join(ROOT, 'music')));
 const DATA_DIR = path.resolve(expandHome(process.env.DATA_DIR || path.join(ROOT, 'data')));
 const PORT = parseInt(process.env.PORT || '8888', 10);
 const HOST = process.env.HOST || '127.0.0.1'; // private by default
+const TLS_CERT = process.env.TLS_CERT;
+const TLS_KEY = process.env.TLS_KEY;
+// Trust X-Forwarded-* headers (set when running behind a reverse proxy/tunnel)
+const TRUST_PROXY = process.env.TRUST_PROXY === '1';
 
 function expandHome(p) {
   return p.startsWith('~') ? path.join(os.homedir(), p.slice(1)) : p;
@@ -32,6 +41,22 @@ fs.mkdirSync(DATA_DIR, { recursive: true });
 
 const library = new Library(MUSIC_DIR, DATA_DIR);
 const store = new Store(DATA_DIR);
+const auth = new Auth(DATA_DIR);
+
+// Passwords from env are applied (and persisted as hashes) at boot.
+if (process.env.PASSWORD) auth.setPassword('listener', process.env.PASSWORD);
+if (process.env.ADMIN_PASSWORD) auth.setPassword('admin', process.env.ADMIN_PASSWORD);
+
+const LOOPBACK = HOST === '127.0.0.1' || HOST === 'localhost' || HOST === '::1';
+// Auth is on whenever a password exists or the server is reachable beyond
+// this machine. Plain localhost with no passwords stays friction-free.
+let AUTH_ENABLED = !LOOPBACK || auth.hasPassword('listener') || auth.hasPassword('admin') || process.env.REQUIRE_AUTH === '1';
+
+let generatedPassword = null;
+if (AUTH_ENABLED && !auth.hasPassword('listener') && !auth.hasPassword('admin')) {
+  generatedPassword = generatePassword();
+  auth.setPassword('listener', generatedPassword);
+}
 
 const MIME = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
@@ -70,6 +95,93 @@ function readBody(req) {
     });
     req.on('error', reject);
   });
+}
+
+// ---- auth gate -------------------------------------------------------------
+
+function parseCookies(req) {
+  const out = {};
+  const raw = req.headers.cookie;
+  if (!raw) return out;
+  for (const part of raw.split(';')) {
+    const eq = part.indexOf('=');
+    if (eq > 0) out[part.slice(0, eq).trim()] = part.slice(eq + 1).trim();
+  }
+  return out;
+}
+
+function clientIp(req) {
+  if (TRUST_PROXY) {
+    const fwd = req.headers['x-forwarded-for'];
+    if (fwd) return fwd.split(',')[0].trim();
+  }
+  return req.socket.remoteAddress || 'unknown';
+}
+
+function isSecure(req) {
+  return !!req.socket.encrypted || (TRUST_PROXY && req.headers['x-forwarded-proto'] === 'https');
+}
+
+function sessionCookie(req, token, maxAge) {
+  return `session=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}` +
+    (isSecure(req) ? '; Secure' : '');
+}
+
+// Paths reachable without a session (login page and its assets).
+const PUBLIC_PATHS = new Set(['/login', '/login.html', '/login.js', '/styles.css', '/api/auth/login', '/api/auth/me']);
+
+// Returns the session (or null) and handles the response itself when access
+// is denied. Callers stop when it returns undefined.
+function gate(req, res, url) {
+  const session = auth.getSession(parseCookies(req).session) || null;
+  if (!AUTH_ENABLED) return { role: 'admin', open: true };
+  const p = url.pathname;
+  if (PUBLIC_PATHS.has(p)) return session || { role: null };
+  if (!session) {
+    if (p.startsWith('/api/')) { json(res, 401, { error: 'unauthorized' }); return undefined; }
+    res.writeHead(302, { Location: '/login' });
+    res.end();
+    return undefined;
+  }
+  // admin surface needs the admin role once an admin password exists
+  const wantsAdmin = p === '/admin' || p === '/admin.html' || p.startsWith('/api/admin/');
+  if (wantsAdmin && auth.hasPassword('admin') && session.role !== 'admin') {
+    if (p.startsWith('/api/')) { json(res, 403, { error: 'admin access required' }); return undefined; }
+    res.writeHead(302, { Location: '/login?admin=1' });
+    res.end();
+    return undefined;
+  }
+  return session;
+}
+
+async function handleAuthApi(req, res, url, action, session) {
+  if (action === 'login' && req.method === 'POST') {
+    const ip = clientIp(req);
+    if (auth.blocked(ip)) return json(res, 429, { error: 'too many attempts — try again in a few minutes' });
+    const body = await readBody(req);
+    const role = auth.verify(body.password);
+    if (!role) {
+      auth.recordFail(ip);
+      return json(res, 401, { error: 'wrong password' });
+    }
+    auth.clearFails(ip);
+    const token = auth.createSession(role);
+    res.setHeader('Set-Cookie', sessionCookie(req, token, 30 * 24 * 3600));
+    return json(res, 200, { ok: true, role });
+  }
+  if (action === 'logout' && req.method === 'POST') {
+    auth.destroySession(parseCookies(req).session);
+    res.setHeader('Set-Cookie', sessionCookie(req, '', 0));
+    return json(res, 200, { ok: true });
+  }
+  if (action === 'me' && req.method === 'GET') {
+    return json(res, 200, {
+      authEnabled: AUTH_ENABLED,
+      role: session && session.role ? session.role : null,
+      adminConfigured: auth.hasPassword('admin'),
+    });
+  }
+  return notFound(res);
 }
 
 // ---- streaming with HTTP Range support (the local "CDN edge") ------------
@@ -431,6 +543,7 @@ async function handleApi(req, res, url) {
 
 function serveStatic(res, pathname) {
   if (pathname === '/admin') pathname = '/admin.html';
+  if (pathname === '/login') pathname = '/login.html';
   const rel = pathname === '/' ? 'index.html' : pathname.replace(/^\/+/, '');
   const publicDir = path.join(ROOT, 'public');
   const filePath = path.normalize(path.join(publicDir, rel));
@@ -444,9 +557,18 @@ function serveStatic(res, pathname) {
   });
 }
 
-const server = http.createServer((req, res) => {
+function handleRequest(req, res) {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
-  if (url.pathname.startsWith('/api/')) {
+  const session = gate(req, res, url);
+  if (session === undefined) return; // gate already responded
+
+  if (url.pathname.startsWith('/api/auth/')) {
+    const action = url.pathname.split('/')[3];
+    handleAuthApi(req, res, url, action, session).catch((err) => {
+      if (!res.headersSent) json(res, 400, { error: err.message });
+      else res.destroy();
+    });
+  } else if (url.pathname.startsWith('/api/')) {
     handleApi(req, res, url).catch((err) => {
       if (!res.headersSent) json(res, 400, { error: err.message });
       else res.destroy();
@@ -456,16 +578,38 @@ const server = http.createServer((req, res) => {
   } else {
     json(res, 405, { error: 'method not allowed' });
   }
-});
+}
+
+const server = TLS_CERT && TLS_KEY
+  ? https.createServer({ cert: fs.readFileSync(TLS_CERT), key: fs.readFileSync(TLS_KEY) }, handleRequest)
+  : http.createServer(handleRequest);
 
 const scanResult = library.scan();
 store.pruneMissing((tid) => !!library.get(tid));
 
 server.listen(PORT, HOST, () => {
+  const scheme = TLS_CERT && TLS_KEY ? 'https' : 'http';
   console.log(`♫ local-spotify`);
   console.log(`  music dir : ${MUSIC_DIR}`);
   console.log(`  library   : ${scanResult.total} tracks (${scanResult.added} added, ${scanResult.removed} removed, scanned in ${scanResult.ms} ms)`);
-  console.log(`  listening : http://${HOST}:${PORT}`);
+  console.log(`  listening : ${scheme}://${HOST}:${PORT}`);
+  if (AUTH_ENABLED) {
+    console.log(`  auth      : on (listener${auth.hasPassword('admin') ? ' + admin' : ''} password)`);
+    if (generatedPassword) {
+      console.log(`  password  : ${generatedPassword}`);
+      console.log(`              (generated now, shown only once — reset with "node tools/set-password.js")`);
+    }
+    if (!auth.hasPassword('admin')) {
+      console.log(`  note      : no separate admin password — every login can use /admin.`);
+      console.log(`              set one with "node tools/set-password.js --admin" before sharing.`);
+    }
+    if (scheme === 'http' && !LOOPBACK && !TRUST_PROXY) {
+      console.log(`  warning   : plain HTTP beyond localhost — passwords travel unencrypted.`);
+      console.log(`              use a tunnel/reverse proxy (see README) or set TLS_CERT/TLS_KEY.`);
+    }
+  } else {
+    console.log(`  auth      : off (localhost only)`);
+  }
   if (scanResult.total === 0) {
     console.log(`  tip       : drop audio files into ${MUSIC_DIR} (or set MUSIC_DIR=~/Music),`);
     console.log(`              or run "node tools/generate-samples.js" for demo tracks.`);

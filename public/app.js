@@ -20,14 +20,19 @@ const state = {
   searchQuery: '',
 };
 
+function authCheck(r) {
+  if (r.status === 401) { location.href = '/login'; throw new Error('signed out'); }
+  return r;
+}
+
 const api = {
-  async get(path) { const r = await fetch(path); if (!r.ok) throw new Error(`GET ${path}: ${r.status}`); return r.json(); },
+  async get(path) { const r = authCheck(await fetch(path)); if (!r.ok) throw new Error(`GET ${path}: ${r.status}`); return r.json(); },
   async send(method, path, body) {
-    const r = await fetch(path, {
+    const r = authCheck(await fetch(path, {
       method,
       headers: body ? { 'Content-Type': 'application/json' } : undefined,
       body: body ? JSON.stringify(body) : undefined,
-    });
+    }));
     if (!r.ok) throw new Error(`${method} ${path}: ${r.status}`);
     return r.json();
   },
@@ -643,9 +648,26 @@ document.addEventListener('keydown', (e) => {
 
 // ------------------------------------------------------------------ boot
 
+async function setupAuthUi() {
+  try {
+    const me = await api.get('/api/auth/me');
+    if (!me.authEnabled) return;
+    if (me.adminConfigured && me.role !== 'admin') $('#admin-link').hidden = true;
+    const signOut = document.createElement('button');
+    signOut.id = 'sign-out';
+    signOut.textContent = '⏻ Sign out';
+    signOut.addEventListener('click', async () => {
+      await api.send('POST', '/api/auth/logout');
+      location.href = '/login';
+    });
+    document.querySelector('.sidebar-footer').appendChild(signOut);
+  } catch { /* redirecting to /login */ }
+}
+
 (async function boot() {
   audio.volume = Number(localStorage.getItem('volume') || 80) / 100;
   $('#volume').value = audio.volume * 100;
+  await setupAuthUi();
   await loadLibrary();
   setView({ name: 'home' });
 })();

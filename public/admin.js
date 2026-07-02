@@ -24,6 +24,8 @@ async function apiJson(method, url, body) {
     headers: body ? { 'Content-Type': 'application/json' } : undefined,
     body: body ? JSON.stringify(body) : undefined,
   });
+  if (r.status === 401) { location.href = '/login'; throw new Error('signed out'); }
+  if (r.status === 403) { location.href = '/login?admin=1'; throw new Error('admin required'); }
   const data = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(data.error || `${method} ${url}: ${r.status}`);
   return data;
