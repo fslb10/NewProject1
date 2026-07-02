@@ -1,0 +1,15 @@
+{
+  "name": "local-spotify",
+  "version": "1.0.0",
+  "description": "Private, local music streaming app — a single-machine take on Spotify's architecture. Zero dependencies.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "samples": "node tools/generate-samples.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MIT",
+  "private": true
+}

@@ -1,0 +1,8 @@
+# user data and library index
+data/
+
+# your music (never committed)
+music/
+
+node_modules/
+*.log
