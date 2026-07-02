@@ -101,11 +101,12 @@ body {
 .pl-item .pl-del:hover { color: #f15e6c; }
 
 .sidebar-footer { padding: 8px 4px 0; border-top: 1px solid #222; }
-.sidebar-footer button {
+.sidebar-footer button, .sidebar-footer a {
   background: none; border: none; color: var(--text-dim);
   cursor: pointer; font-size: 12.5px; padding: 6px 8px;
+  display: inline-block; text-decoration: none;
 }
-.sidebar-footer button:hover { color: var(--text); }
+.sidebar-footer button:hover, .sidebar-footer a:hover { color: var(--text); }
 
 /* ---------------- main ---------------- */
 

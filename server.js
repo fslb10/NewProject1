@@ -120,7 +120,24 @@ function streamTrack(req, res, track) {
   res.on('close', () => stream.destroy());
 }
 
-// ---- artwork: embedded art with an in-memory cache, SVG fallback ---------
+// ---- artwork: custom uploads > embedded art > generated SVG --------------
+
+const ART_DIR = path.join(DATA_DIR, 'artwork');
+const ART_EXTS = { 'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp', 'image/gif': '.gif' };
+const ART_MIMES = { '.jpg': 'image/jpeg', '.png': 'image/png', '.webp': 'image/webp', '.gif': 'image/gif' };
+
+function customArtPath(trackId) {
+  for (const ext of Object.keys(ART_MIMES)) {
+    const p = path.join(ART_DIR, trackId + ext);
+    if (fs.existsSync(p)) return p;
+  }
+  return null;
+}
+
+const customArtIds = new Set();
+try {
+  for (const f of fs.readdirSync(ART_DIR)) customArtIds.add(path.basename(f, path.extname(f)));
+} catch { /* no artwork dir yet */ }
 
 const artCache = new Map(); // trackId -> { mime, data } | null
 const ART_CACHE_MAX = 200;
@@ -142,6 +159,12 @@ function placeholderSvg(seed, label) {
 }
 
 function serveArtwork(res, track) {
+  const custom = customArtPath(track.id);
+  if (custom) {
+    const data = fs.readFileSync(custom);
+    res.writeHead(200, { 'Content-Type': ART_MIMES[path.extname(custom)], 'Content-Length': data.length, 'Cache-Control': 'no-cache' });
+    return res.end(data);
+  }
   if (track.hasArt) {
     let art = artCache.get(track.id);
     if (art === undefined) {
@@ -160,16 +183,160 @@ function serveArtwork(res, track) {
   res.end(svg);
 }
 
+// ---- admin: uploads and library management --------------------------------
+
+const UPLOAD_EXTS = new Set(['.mp3', '.flac', '.ogg', '.oga', '.opus', '.wav', '.wave', '.m4a', '.aac', '.webm']);
+const MAX_UPLOAD = 2 * 1024 * 1024 * 1024; // 2 GB
+
+// A path segment safe on every filesystem (used for Artist/Album/file names).
+function safeSegment(name, fallback) {
+  const cleaned = String(name || '')
+    .replace(/[\x00-\x1f\x7f]/g, '')
+    .replace(/[/\\:*?"<>|]/g, '_')
+    .replace(/^\.+/, '')
+    .trim()
+    .slice(0, 120);
+  return cleaned || fallback;
+}
+
+function receiveUpload(req, res, url) {
+  const params = url.searchParams;
+  const origName = params.get('filename') || 'upload';
+  const ext = path.extname(origName).toLowerCase();
+  if (!UPLOAD_EXTS.has(ext)) return json(res, 400, { error: `unsupported file type "${ext}"` });
+
+  const artist = safeSegment(params.get('artist'), 'Unknown Artist');
+  const album = safeSegment(params.get('album'), 'Unknown Album');
+  const trackNum = parseInt(params.get('track') || '0', 10) || 0;
+  const title = safeSegment(params.get('title'), safeSegment(path.basename(origName, ext), 'Untitled'));
+  const baseName = (trackNum ? String(trackNum).padStart(2, '0') + ' - ' : '') + title;
+
+  const dir = path.join(MUSIC_DIR, artist, album);
+  fs.mkdirSync(dir, { recursive: true });
+  let dest = path.join(dir, baseName + ext);
+  for (let i = 2; fs.existsSync(dest); i++) dest = path.join(dir, `${baseName} (${i})${ext}`);
+
+  const tmp = dest + '.part';
+  const out = fs.createWriteStream(tmp);
+  let received = 0;
+  let failed = false;
+
+  const abort = (status, message) => {
+    if (failed) return;
+    failed = true;
+    out.destroy();
+    fs.rm(tmp, { force: true }, () => {});
+    if (!res.headersSent) json(res, status, { error: message });
+    req.destroy();
+  };
+
+  req.on('data', (chunk) => {
+    received += chunk.length;
+    if (received > MAX_UPLOAD) return abort(413, 'file too large');
+    if (!out.write(chunk)) { req.pause(); out.once('drain', () => req.resume()); }
+  });
+  req.on('error', () => abort(400, 'upload interrupted'));
+  out.on('error', (err) => abort(500, err.message));
+  req.on('end', () => {
+    if (failed) return;
+    out.end(() => {
+      try {
+        fs.renameSync(tmp, dest);
+      } catch (err) {
+        return abort(500, err.message);
+      }
+      library.scan();
+      const rel = path.relative(MUSIC_DIR, dest);
+      const id = require('./lib/scanner').trackId(rel);
+      // The form fields are authoritative: store them as edits so they win
+      // over whatever tags (or lack of tags) the file itself carries.
+      const edits = {};
+      for (const key of ['title', 'artist', 'album', 'year', 'genre']) {
+        const value = params.get(key);
+        if (value && value.trim()) edits[key] = value.trim();
+      }
+      if (trackNum) edits.track = trackNum;
+      const track = Object.keys(edits).length ? library.updateTrack(id, edits) : library.get(id);
+      json(res, 201, { ok: true, track });
+    });
+  });
+}
+
+function receiveArtwork(req, res, track) {
+  const ext = ART_EXTS[(req.headers['content-type'] || '').split(';')[0].trim()];
+  if (!ext) return json(res, 400, { error: 'send an image (jpeg, png, webp, or gif) as the request body' });
+  fs.mkdirSync(ART_DIR, { recursive: true });
+  const chunks = [];
+  let size = 0;
+  req.on('data', (chunk) => {
+    size += chunk.length;
+    if (size > 10 * 1024 * 1024) { json(res, 413, { error: 'image too large (10 MB max)' }); req.destroy(); }
+    else chunks.push(chunk);
+  });
+  req.on('end', () => {
+    if (res.headersSent) return;
+    if (!size) return json(res, 400, { error: 'empty body' });
+    const existing = customArtPath(track.id);
+    if (existing) fs.rmSync(existing, { force: true });
+    fs.writeFileSync(path.join(ART_DIR, track.id + ext), Buffer.concat(chunks));
+    artCache.delete(track.id);
+    customArtIds.add(track.id);
+    json(res, 200, { ok: true });
+  });
+}
+
 // ---- API routing ----------------------------------------------------------
 
 async function handleApi(req, res, url) {
   const parts = url.pathname.split('/').filter(Boolean); // ['api', ...]
   const [, resource, id, sub] = parts;
 
+  if (resource === 'admin') {
+    if (id === 'upload' && req.method === 'POST') return receiveUpload(req, res, url);
+    if (id === 'tracks' && sub) {
+      const track = library.get(sub);
+      if (!track) return notFound(res);
+      if (req.method === 'PATCH') {
+        const body = await readBody(req);
+        return json(res, 200, library.updateTrack(sub, body));
+      }
+      if (req.method === 'DELETE') {
+        try {
+          fs.rmSync(library.absPath(track));
+        } catch (err) {
+          return json(res, 500, { error: err.message });
+        }
+        const art = customArtPath(sub);
+        if (art) fs.rmSync(art, { force: true });
+        artCache.delete(sub);        customArtIds.delete(sub);
+        library.scan();
+        store.pruneMissing((tid) => !!library.get(tid));
+        return json(res, 200, { ok: true });
+      }
+    }
+    if (id === 'artwork' && sub) {
+      const track = library.get(sub);
+      if (!track) return notFound(res);
+      if (req.method === 'POST') return receiveArtwork(req, res, track);
+      if (req.method === 'DELETE') {
+        const art = customArtPath(sub);
+        if (art) fs.rmSync(art, { force: true });
+        artCache.delete(sub);        customArtIds.delete(sub);
+        return json(res, 200, { ok: true });
+      }
+    }
+    return notFound(res);
+  }
+
   if (resource === 'library' && req.method === 'GET') {
+    const albums = library.albums();
+    for (const album of albums) {
+      const custom = album.trackIds.find((tid) => customArtIds.has(tid));
+      if (custom) album.coverTrackId = custom;
+    }
     return json(res, 200, {
       tracks: library.list(),
-      albums: library.albums(),
+      albums,
       artists: library.artists(),
       playlists: store.state.playlists,
       liked: store.state.liked,
@@ -263,6 +430,7 @@ async function handleApi(req, res, url) {
 // ---- static files ----------------------------------------------------------
 
 function serveStatic(res, pathname) {
+  if (pathname === '/admin') pathname = '/admin.html';
   const rel = pathname === '/' ? 'index.html' : pathname.replace(/^\/+/, '');
   const publicDir = path.join(ROOT, 'public');
   const filePath = path.normalize(path.join(publicDir, rel));

@@ -1,0 +1,166 @@
+/* Admin dashboard — extends styles.css */
+
+.admin-body {
+  overflow: auto;
+  background: var(--bg);
+}
+
+.admin-wrap {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 28px 24px 80px;
+}
+
+.admin-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 26px;
+}
+.admin-header h1 { font-size: 26px; font-weight: 800; margin-bottom: 4px; }
+.admin-header-actions { display: flex; gap: 10px; }
+.admin-header-actions .ghost-btn { text-decoration: none; display: inline-block; }
+
+.admin-section {
+  background: var(--bg-raised);
+  border-radius: 10px;
+  padding: 20px;
+  margin-bottom: 22px;
+}
+.admin-section h2 { font-size: 17px; font-weight: 700; margin-bottom: 14px; }
+
+.accent-btn {
+  background: var(--accent);
+  color: #000;
+  border: none;
+  border-radius: 18px;
+  padding: 8px 20px;
+  font-weight: 700;
+  font-size: 13px;
+  cursor: pointer;
+}
+.accent-btn:hover { filter: brightness(1.1); }
+.accent-btn:disabled { opacity: .5; cursor: default; }
+
+/* ---- drop zone ---- */
+
+#dropzone {
+  border: 2px dashed #3c3c3c;
+  border-radius: 10px;
+  padding: 30px;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color .15s, background .15s;
+}
+#dropzone.dragover { border-color: var(--accent); background: rgba(29,185,84,.06); }
+.dz-icon { font-size: 26px; margin-bottom: 6px; }
+.dz-inner div { margin-bottom: 4px; }
+.dz-browse { color: var(--accent); cursor: pointer; text-decoration: underline; }
+
+/* ---- upload queue ---- */
+
+#upload-queue { margin-top: 14px; display: flex; flex-direction: column; gap: 10px; }
+
+.up-row {
+  background: #202020;
+  border-radius: 8px;
+  padding: 12px 14px;
+}
+.up-row.done { opacity: .55; }
+.up-file {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+  font-size: 13px;
+}
+.up-file .up-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.up-file .up-size { color: var(--text-dim); flex-shrink: 0; }
+.up-file .up-remove { background: none; border: none; color: var(--text-dim); cursor: pointer; font-size: 14px; }
+.up-file .up-remove:hover { color: #f15e6c; }
+
+.up-fields {
+  display: grid;
+  grid-template-columns: 2fr 1.5fr 1.5fr 64px 76px 1fr;
+  gap: 8px;
+}
+.up-fields input, .tm-edit input, #admin-filter {
+  background: #121212;
+  border: 1px solid #333;
+  border-radius: 6px;
+  color: var(--text);
+  padding: 7px 10px;
+  font-size: 13px;
+  width: 100%;
+}
+.up-fields input:focus, .tm-edit input:focus, #admin-filter:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.up-progress {
+  height: 4px;
+  background: #333;
+  border-radius: 2px;
+  margin-top: 10px;
+  overflow: hidden;
+  display: none;
+}
+.up-progress.active { display: block; }
+.up-progress > div { height: 100%; width: 0%; background: var(--accent); transition: width .2s; }
+.up-error { color: #f15e6c; font-size: 12.5px; margin-top: 8px; }
+
+#upload-actions { margin-top: 14px; display: flex; align-items: center; gap: 12px; }
+
+/* ---- track manager ---- */
+
+#admin-filter { max-width: 360px; margin-bottom: 14px; }
+
+.tm-row {
+  display: grid;
+  grid-template-columns: 44px 1fr auto;
+  gap: 12px;
+  align-items: center;
+  padding: 8px 10px;
+  border-radius: 8px;
+}
+.tm-row:hover { background: #202020; }
+.tm-row img { width: 44px; height: 44px; border-radius: 5px; object-fit: cover; }
+.tm-meta { min-width: 0; }
+.tm-title { font-weight: 600; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tm-sub { color: var(--text-dim); font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tm-actions { display: flex; gap: 6px; flex-shrink: 0; }
+.tm-actions button {
+  background: none;
+  border: 1px solid #444;
+  color: var(--text-dim);
+  border-radius: 14px;
+  padding: 4px 12px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.tm-actions button:hover { color: var(--text); border-color: var(--text); }
+.tm-actions button.danger:hover { color: #f15e6c; border-color: #f15e6c; }
+
+.tm-edit {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: 2fr 1.5fr 1.5fr 64px 76px 1fr;
+  gap: 8px;
+  padding: 10px 4px 4px;
+}
+.tm-edit .tm-edit-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.field-label { font-size: 10.5px; letter-spacing: .8px; color: var(--text-dim); display: block; margin-bottom: 3px; }
+
+@media (max-width: 720px) {
+  .up-fields, .tm-edit { grid-template-columns: 1fr 1fr; }
+}

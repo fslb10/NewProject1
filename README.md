@@ -39,6 +39,11 @@ streaming (metadata falls back to file/folder names for those).
 - **Player** — queue panel, shuffle, repeat (off/all/one), seek, volume,
   Media Session API (OS media keys and lock-screen controls), keyboard
   shortcuts (`Space` play/pause, `Shift+←/→` prev/next, `/` search)
+- **Admin dashboard** (<http://127.0.0.1:8888/admin>) — drag-and-drop upload
+  with per-file metadata (files are filed into `Artist/Album/NN - Title.ext`),
+  inline editing of title/artist/album/track/year/genre, custom cover-art
+  upload, and track deletion. Manual edits are stored as overrides in the
+  library index, so they win over file tags and survive rescans.
 
 ## How this maps to Spotify's real architecture
 
@@ -77,14 +82,19 @@ to the internet.
 | `POST /api/playlists/:id/tracks`     | Add a track                              |
 | `PUT/DELETE /api/liked/:trackId`     | Like / unlike                            |
 | `POST /api/events/play`              | Record a playback event                  |
+| `POST /api/admin/upload?filename=&title=&artist=&album=&track=&year=&genre=` | Upload an audio file (raw body); filed into the music folder |
+| `PATCH /api/admin/tracks/:id`        | Edit metadata (persisted as overrides)   |
+| `DELETE /api/admin/tracks/:id`       | Delete the track's file from disk        |
+| `POST/DELETE /api/admin/artwork/:id` | Upload / remove custom cover art (raw image body) |
 
 ## Layout
 
 ```
-server.js               HTTP server: API, range streaming, static files
+server.js               HTTP server: API, range streaming, uploads, static files
 lib/tags.js             MP3/FLAC/OGG/WAV metadata readers (pure JS)
-lib/scanner.js          Library scan + incremental index (data/library.json)
+lib/scanner.js          Library scan + incremental index + metadata overrides
 lib/store.js            Playlists, likes, play history (data/state.json)
-public/                 Single-page client (index.html, app.js, styles.css)
+public/                 Player SPA (index.html, app.js, styles.css)
+public/admin.*          Admin dashboard (upload, edit info, artwork, delete)
 tools/generate-samples.js  Synthesizes a small demo library into ./music
 ```
