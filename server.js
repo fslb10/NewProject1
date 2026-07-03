@@ -186,7 +186,7 @@ async function handleAuthApi(req, res, url, action, session) {
 
 // ---- streaming with HTTP Range support (the local "CDN edge") ------------
 
-function streamTrack(req, res, track) {
+function streamTrack(req, res, track, opts = {}) {
   const filePath = library.absPath(track);
   let stat;
   try {
@@ -224,6 +224,12 @@ function streamTrack(req, res, track) {
     'Cache-Control': 'private, max-age=3600',
   };
   if (status === 206) headers['Content-Range'] = `bytes ${start}-${end}/${stat.size}`;
+  if (opts.download) {
+    const nice = `${track.artist} - ${track.title}${track.ext}`;
+    const ascii = nice.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '_');
+    headers['Content-Disposition'] =
+      `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(nice)}`;
+  }
   res.writeHead(status, headers);
   if (req.method === 'HEAD') return res.end();
   const stream = fs.createReadStream(filePath, { start, end });
@@ -500,6 +506,12 @@ async function handleApi(req, res, url) {
     const track = library.get(id);
     if (!track) return notFound(res);
     return streamTrack(req, res, track);
+  }
+
+  if (resource === 'download' && id && req.method === 'GET') {
+    const track = library.get(id);
+    if (!track) return notFound(res);
+    return streamTrack(req, res, track, { download: true });
   }
 
   if (resource === 'artwork' && id && req.method === 'GET') {

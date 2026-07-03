@@ -176,11 +176,13 @@ function updateNowPlaying() {
   const track = currentTrack();
   const art = $('#np-art');
   const likeBtn = $('#np-like');
+  const dlBtn = $('#np-dl');
   if (!track) {
     $('#np-title').textContent = 'Nothing playing';
     $('#np-artist').textContent = '';
     art.hidden = true;
     likeBtn.hidden = true;
+    dlBtn.hidden = true;
     return;
   }
   $('#np-title').textContent = track.title;
@@ -188,6 +190,7 @@ function updateNowPlaying() {
   art.src = artUrl(track.id);
   art.hidden = false;
   likeBtn.hidden = false;
+  dlBtn.hidden = false;
   likeBtn.textContent = state.liked.has(track.id) ? '💚' : '♡';
   document.title = `${track.title} · ${track.artist} — Local Spotify`;
 }
@@ -204,6 +207,16 @@ function updateMediaSession(track) {
   navigator.mediaSession.setActionHandler('pause', () => audio.pause());
   navigator.mediaSession.setActionHandler('previoustrack', prev);
   navigator.mediaSession.setActionHandler('nexttrack', () => next(false));
+}
+
+function downloadTrack(trackId) {
+  // A temporary <a download> keeps playback running while the file saves.
+  const a = document.createElement('a');
+  a.href = `/api/download/${trackId}`;
+  a.download = '';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
 }
 
 // ------------------------------------------------------------------ likes
@@ -416,6 +429,7 @@ function trackTable(trackIds, opts = {}) {
         <button data-act="like" class="${state.liked.has(t.id) ? 'liked' : ''}" title="Like">${state.liked.has(t.id) ? '💚' : '♡'}</button>
         <button data-act="next" title="Play next">⏭</button>
         <button data-act="add" title="Add to playlist">＋</button>
+        <button data-act="dl" title="Download">⬇</button>
         ${opts.playlistId ? '<button data-act="remove" title="Remove from playlist">✕</button>' : ''}
       </td>
       <td class="t-dur">${fmtTime(t.duration)}</td>
@@ -440,6 +454,7 @@ function bindTrackTables() {
         if (btn.dataset.act === 'like') return toggleLike(id);
         if (btn.dataset.act === 'next') return addNext(id);
         if (btn.dataset.act === 'add') return addToPlaylistPrompt(id);
+        if (btn.dataset.act === 'dl') return downloadTrack(id);
         if (btn.dataset.act === 'remove' && playlistId) {
           const playlist = state.playlists.find((p) => p.id === playlistId);
           const trackIds = playlist.trackIds.filter((t) => t !== id);
@@ -609,6 +624,10 @@ $('#btn-repeat').addEventListener('click', () => {
 $('#np-like').addEventListener('click', () => {
   const track = currentTrack();
   if (track) toggleLike(track.id);
+});
+$('#np-dl').addEventListener('click', () => {
+  const track = currentTrack();
+  if (track) downloadTrack(track.id);
 });
 $('#btn-queue').addEventListener('click', () => {
   const panel = $('#queue-panel');

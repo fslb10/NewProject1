@@ -202,7 +202,7 @@ body {
 .t-title { font-weight: 500; }
 .t-artist, .t-album, .t-dur { color: var(--text-dim); font-size: 13px; }
 .t-dur { text-align: right; width: 60px; font-variant-numeric: tabular-nums; }
-.t-actions { width: 84px; text-align: right; white-space: nowrap; }
+.t-actions { width: 116px; text-align: right; white-space: nowrap; }
 .t-actions button {
   background: none; border: none; color: var(--text-dim);
   cursor: pointer; font-size: 14px; padding: 2px 5px;
