@@ -4,6 +4,19 @@ A private, self-contained music streaming app that runs **entirely on your machi
 No accounts, no telemetry, no network calls to anyone — just Node.js (18+), your music
 folder, and a browser. Zero npm dependencies.
 
+**Quick start** — one command after cloning:
+
+```
+./setup.sh              # macOS / Linux     (.\setup.ps1 on Windows)
+./setup.sh --tunnel     # …and open a public HTTPS URL (Cloudflare Tunnel)
+```
+
+It checks Node, fills an empty library with demo tracks, generates and
+prints your listener + admin passwords, and starts the server on
+<http://127.0.0.1:8888>.
+
+**Manual start**, if you prefer:
+
 ```
 node tools/generate-samples.js   # optional: create 10 synthesized demo tracks
 node server.js                   # serve ./music on http://127.0.0.1:8888
