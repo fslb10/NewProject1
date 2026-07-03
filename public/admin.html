@@ -41,6 +41,11 @@
   <section class="admin-section">
     <h2>Manage tracks</h2>
     <input id="admin-filter" type="search" placeholder="Filter by title, artist, or album…">
+    <div class="tm-toolbar">
+      <label class="tm-select-all"><input type="checkbox" id="tm-select-all"> <span id="tm-select-all-label">Select all</span></label>
+      <button id="tm-delete-selected" class="ghost-btn danger" disabled>Delete selected</button>
+      <span class="muted" id="tm-selection-count"></span>
+    </div>
     <div id="track-manager"></div>
   </section>
 </div>

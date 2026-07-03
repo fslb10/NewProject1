@@ -193,18 +193,48 @@ dropzone.addEventListener('drop', (e) => addFiles([...e.dataTransfer.files]));
 // --------------------------------------------------------------- track manager
 
 let editingId = null;
+const selected = new Set(); // track ids picked for bulk actions
+let lastShown = [];         // tracks matching the current filter
 
-function renderManager() {
+function filteredTracks() {
   const filter = $('#admin-filter').value.toLowerCase().trim();
   const terms = filter.split(/\s+/).filter(Boolean);
-  const shown = tracks.filter((t) =>
+  return tracks.filter((t) =>
     terms.every((term) => `${t.title} ${t.artist} ${t.album}`.toLowerCase().includes(term)));
+}
+
+function updateSelectionUi() {
+  // drop selections that no longer exist in the library
+  const valid = new Set(tracks.map((t) => t.id));
+  for (const id of selected) if (!valid.has(id)) selected.delete(id);
+
+  const btn = $('#tm-delete-selected');
+  btn.disabled = selected.size === 0;
+  btn.textContent = selected.size ? `Delete selected (${selected.size})` : 'Delete selected';
+  $('#tm-selection-count').textContent = selected.size ? `${selected.size} of ${tracks.length} selected` : '';
+  $('#tm-select-all-label').textContent = `Select all${lastShown.length !== tracks.length ? ` (${lastShown.length} filtered)` : ''}`;
+  const all = $('#tm-select-all');
+  all.checked = lastShown.length > 0 && lastShown.every((t) => selected.has(t.id));
+  all.indeterminate = !all.checked && lastShown.some((t) => selected.has(t.id));
+  document.querySelectorAll('.tm-row').forEach((row) => {
+    const on = selected.has(row.dataset.id);
+    row.classList.toggle('selected', on);
+    const check = row.querySelector('.tm-check');
+    if (check) check.checked = on;
+  });
+}
+
+function renderManager() {
+  const shown = filteredTracks();
+  lastShown = shown;
   const box = $('#track-manager');
   box.innerHTML = shown.length ? '' : '<div class="empty-note">No tracks match.</div>';
   for (const t of shown.slice(0, 500)) {
     const row = document.createElement('div');
     row.className = 'tm-row';
+    row.dataset.id = t.id;
     row.innerHTML = `
+      <input type="checkbox" class="tm-check" title="Select">
       <img src="/api/artwork/${t.id}?v=${t.mtimeMs}" loading="lazy" alt="">
       <div class="tm-meta">
         <div class="tm-title">${esc(t.title)}</div>
@@ -215,11 +245,16 @@ function renderManager() {
         <button data-act="art">Artwork</button>
         <button data-act="delete" class="danger">Delete</button>
       </div>`;
+    row.querySelector('.tm-check').addEventListener('change', (e) => {
+      if (e.target.checked) selected.add(t.id); else selected.delete(t.id);
+      updateSelectionUi();
+    });
     row.querySelector('[data-act="edit"]').addEventListener('click', () => openEditor(t, row));
     row.querySelector('[data-act="art"]').addEventListener('click', () => pickArtwork(t, row));
     row.querySelector('[data-act="delete"]').addEventListener('click', async () => {
       if (!confirm(`Delete "${t.title}" by ${t.artist}?\n\nThis removes the file from your music folder.`)) return;
       await apiJson('DELETE', `/api/admin/tracks/${t.id}`);
+      selected.delete(t.id);
       await loadTracks();
     });
     box.appendChild(row);
@@ -230,7 +265,38 @@ function renderManager() {
     note.textContent = `Showing first 500 of ${shown.length} — narrow the filter to see more.`;
     box.appendChild(note);
   }
+  updateSelectionUi();
 }
+
+$('#tm-select-all').addEventListener('change', (e) => {
+  // acts on everything matching the filter, not just the 500 rows shown
+  for (const t of lastShown) {
+    if (e.target.checked) selected.add(t.id); else selected.delete(t.id);
+  }
+  updateSelectionUi();
+});
+
+$('#tm-delete-selected').addEventListener('click', async () => {
+  if (!selected.size) return;
+  const names = tracks.filter((t) => selected.has(t.id)).slice(0, 5)
+    .map((t) => `  • ${t.title} — ${t.artist}`).join('\n');
+  const more = selected.size > 5 ? `\n  …and ${selected.size - 5} more` : '';
+  if (!confirm(`Delete ${selected.size} song${selected.size > 1 ? 's' : ''} from your library?\n\n${names}${more}\n\nThis removes the files from your music folder.`)) return;
+  const btn = $('#tm-delete-selected');
+  btn.disabled = true;
+  btn.textContent = 'Deleting…';
+  try {
+    const result = await apiJson('POST', '/api/admin/tracks/delete', { trackIds: [...selected] });
+    selected.clear();
+    await loadTracks();
+    if (result.failed && result.failed.length) {
+      alert(`Deleted ${result.deleted}, but ${result.failed.length} could not be removed (files may be locked or already gone).`);
+    }
+  } catch (err) {
+    alert('Bulk delete failed: ' + err.message);
+    await loadTracks();
+  }
+});
 
 function openEditor(t, row) {
   if (editingId === t.id) return;

@@ -405,6 +405,30 @@ async function handleApi(req, res, url) {
 
   if (resource === 'admin') {
     if (id === 'upload' && req.method === 'POST') return receiveUpload(req, res, url);
+    if (id === 'tracks' && sub === 'delete' && req.method === 'POST') {
+      const body = await readBody(req);
+      const ids = Array.isArray(body.trackIds) ? body.trackIds.slice(0, 5000) : [];
+      let deleted = 0;
+      const failed = [];
+      for (const tid of ids) {
+        const track = library.get(tid);
+        if (!track) { failed.push(tid); continue; }
+        try {
+          fs.rmSync(library.absPath(track));
+        } catch {
+          failed.push(tid);
+          continue;
+        }
+        const art = customArtPath(tid);
+        if (art) fs.rmSync(art, { force: true });
+        artCache.delete(tid);
+        customArtIds.delete(tid);
+        deleted++;
+      }
+      library.scan();
+      store.pruneMissing((tid) => !!library.get(tid));
+      return json(res, 200, { ok: true, deleted, failed });
+    }
     if (id === 'tracks' && sub) {
       const track = library.get(sub);
       if (!track) return notFound(res);
