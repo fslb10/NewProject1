@@ -21,6 +21,7 @@ const { Library } = require('./lib/scanner');
 const { Store } = require('./lib/store');
 const { readTags } = require('./lib/tags');
 const { Auth, generatePassword } = require('./lib/auth');
+const { qrSvg } = require('./lib/qr');
 
 const ROOT = __dirname;
 const MUSIC_DIR = path.resolve(expandHome(process.env.MUSIC_DIR || path.join(ROOT, 'music')));
@@ -494,6 +495,19 @@ async function handleApi(req, res, url) {
 
   if (resource === 'search' && req.method === 'GET') {
     return json(res, 200, library.search(url.searchParams.get('q') || ''));
+  }
+
+  if (resource === 'qr.svg' && req.method === 'GET') {
+    const data = (url.searchParams.get('data') || '').slice(0, 300);
+    if (!data) return json(res, 400, { error: 'data parameter required' });
+    let svg;
+    try {
+      svg = qrSvg(data);
+    } catch (err) {
+      return json(res, 400, { error: err.message });
+    }
+    res.writeHead(200, { 'Content-Type': 'image/svg+xml', 'Cache-Control': 'no-cache' });
+    return res.end(svg);
   }
 
   if (resource === 'home' && req.method === 'GET') {

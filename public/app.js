@@ -922,6 +922,23 @@ $('#new-playlist').addEventListener('click', async () => {
   setView({ name: 'playlist', id: playlist.id });
 });
 
+$('#share-qr').addEventListener('click', () => {
+  const overlay = document.createElement('div');
+  overlay.className = 'share-overlay';
+  overlay.innerHTML = `<div class="share-card">
+    <h2>Listen on your phone</h2>
+    <img src="/api/qr.svg?data=${encodeURIComponent(location.origin)}" alt="QR code">
+    <div class="share-url">${esc(location.origin)}</div>
+    <div class="muted share-hint">Scan with the phone camera, sign in with the listener password,
+      then use “Add to Home Screen” to install the app.</div>
+    <button class="ghost-btn share-close">Close</button>
+  </div>`;
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay || e.target.closest('.share-close')) overlay.remove();
+  });
+  document.body.appendChild(overlay);
+});
+
 $('#rescan').addEventListener('click', async () => {
   const btn = $('#rescan');
   btn.textContent = '⟳ Scanning…';
