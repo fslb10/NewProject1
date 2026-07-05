@@ -65,6 +65,8 @@
       </div>
     </div>
     <div class="player-right">
+      <button id="btn-radio" class="icon-btn" title="Radio — keep playing similar songs">📻</button>
+      <button id="btn-sleep" class="icon-btn" title="Sleep timer">🌙</button>
       <button id="btn-queue" class="icon-btn" title="Queue">☰</button>
       <span class="vol-icon">🔊</span>
       <input id="volume" type="range" min="0" max="100" value="80">
@@ -84,6 +86,7 @@
   </nav>
 
   <div id="np-full" hidden>
+    <canvas id="npf-viz"></canvas>
     <button id="npf-close" title="Close">⌄</button>
     <img id="npf-art" src="" alt="">
     <div id="npf-title"></div>
@@ -102,6 +105,9 @@
     </div>
     <div class="npf-extra">
       <button id="npf-like" class="icon-btn" title="Like">♡</button>
+      <button id="npf-radio" class="icon-btn" title="Radio — keep playing similar songs">📻</button>
+      <button id="npf-sleep" class="icon-btn" title="Sleep timer">🌙</button>
+      <button id="npf-viz-btn" class="icon-btn" title="Visualizer on/off">📊</button>
       <button id="npf-dl" class="icon-btn" title="Download">⬇</button>
     </div>
   </div>

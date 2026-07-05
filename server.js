@@ -376,7 +376,7 @@ function receiveUpload(req, res, url) {
       // The form fields are authoritative: store them as edits so they win
       // over whatever tags (or lack of tags) the file itself carries.
       const edits = {};
-      for (const key of ['title', 'artist', 'album', 'year', 'genre']) {
+      for (const key of ['title', 'artist', 'album', 'year', 'genre', 'tags']) {
         const value = params.get(key);
         if (value && value.trim()) edits[key] = value.trim();
       }

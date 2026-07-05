@@ -87,6 +87,8 @@
   grid-template-columns: 2fr 1.5fr 1.5fr 64px 76px 1fr;
   gap: 8px;
 }
+/* the TAGS field (7th) gets its own full-width row */
+.up-fields > span:nth-child(7), .tm-edit > span:nth-child(7) { grid-column: 1 / -1; }
 .up-fields input, .tm-edit input, #admin-filter {
   background: #121212;
   border: 1px solid #333;

@@ -483,6 +483,54 @@ input[type="range"]:hover::-moz-range-thumb { opacity: 1; }
 .now-playing { cursor: pointer; }
 #np-like, #np-dl { cursor: pointer; }
 
+/* ---------------- genre / tag browse ---------------- */
+
+.cat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 14px;
+}
+.cat-card {
+  background: linear-gradient(135deg, hsl(var(--h), 55%, 38%), hsl(calc(var(--h) + 35), 60%, 22%));
+  border-radius: 10px;
+  padding: 18px 16px;
+  min-height: 92px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  transition: transform .12s;
+}
+.cat-card:hover { transform: scale(1.03); }
+.cat-name { font-weight: 800; font-size: 17px; text-transform: capitalize; word-break: break-word; }
+.cat-count { font-size: 12px; color: rgba(255,255,255,.75); }
+
+.cat-hero {
+  width: 180px; height: 180px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, hsl(var(--h), 55%, 38%), hsl(calc(var(--h) + 35), 60%, 22%));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 84px;
+  font-weight: 800;
+  color: rgba(255,255,255,.85);
+  box-shadow: 0 10px 40px rgba(0,0,0,.55);
+  flex-shrink: 0;
+}
+
+/* ---------------- visualizer ---------------- */
+
+#npf-viz {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 0;
+  pointer-events: none;
+}
+#np-full > *:not(#npf-viz) { position: relative; z-index: 1; }
+
 /* ---------------- share / QR overlay ---------------- */
 
 .share-overlay {
@@ -560,6 +608,8 @@ input[type="range"]:hover::-moz-range-thumb { opacity: 1; }
 
   .detail-head { gap: 14px; }
   .detail-head img { width: 110px; height: 110px; }
+  .cat-hero { width: 110px; height: 110px; font-size: 48px; }
   .detail-head h1 { font-size: 24px; }
+  .cat-grid { grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 10px; }
   #queue-panel { right: 8px; left: 8px; width: auto; }
 }

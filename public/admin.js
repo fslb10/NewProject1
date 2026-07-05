@@ -54,12 +54,14 @@ function guessFields(file) {
     track: m ? String(parseInt(m[1], 10)) : '',
     year: '',
     genre: '',
+    tags: '',
   };
 }
 
 const FIELD_DEFS = [
   ['title', 'TITLE'], ['artist', 'ARTIST'], ['album', 'ALBUM'],
   ['track', '#'], ['year', 'YEAR'], ['genre', 'GENRE'],
+  ['tags', 'TAGS (comma-sep: spanish, workout…)'],
 ];
 
 function addFiles(files) {
@@ -74,6 +76,7 @@ function addFiles(files) {
       item.fields.album = item.fields.album || prev.fields.album;
       item.fields.year = item.fields.year || prev.fields.year;
       item.fields.genre = item.fields.genre || prev.fields.genre;
+      item.fields.tags = item.fields.tags || prev.fields.tags;
     }
     uploadQueue.push(item);
   }
@@ -304,7 +307,7 @@ function openEditor(t, row) {
   editingId = t.id;
   const editor = document.createElement('div');
   editor.className = 'tm-edit';
-  const values = { title: t.title, artist: t.artist, album: t.album, track: t.track || '', year: t.year, genre: t.genre };
+  const values = { title: t.title, artist: t.artist, album: t.album, track: t.track || '', year: t.year, genre: t.genre, tags: (t.tags || []).join(', ') };
   editor.innerHTML = `
     ${FIELD_DEFS.map(([key, label]) => `
       <span><span class="field-label">${label}</span>

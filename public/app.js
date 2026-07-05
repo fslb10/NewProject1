@@ -17,6 +17,7 @@ const state = {
   queuePos: -1,
   shuffle: false,
   repeat: 'off',      // off | all | one
+  radio: false,       // keep playing similar tracks when the queue ends
   searchQuery: '',
 };
 
@@ -120,6 +121,7 @@ function saveResume() {
       time: audio.currentTime || 0,
       shuffle: state.shuffle,
       repeat: state.repeat,
+      radio: state.radio,
     }));
   } catch { /* storage full/blocked */ }
 }
@@ -135,6 +137,7 @@ function restoreSession() {
   state.queuePos = idx >= 0 ? idx : 0;
   state.shuffle = !!saved.shuffle;
   state.repeat = saved.repeat === 'all' || saved.repeat === 'one' ? saved.repeat : 'off';
+  state.radio = !!saved.radio;
   syncTransportUi();
   const track = currentTrack();
   audio.src = `/api/stream/${track.id}`;
@@ -149,14 +152,45 @@ function restoreSession() {
   updateMediaSession(track);
 }
 
+// Radio: pick tracks similar to the current one (genre first, then artist)
+// that aren't already queued.
+function radioContinuation(count = 10) {
+  const current = currentTrack();
+  const queued = new Set(state.queue);
+  const pool = [...state.tracks.values()].filter((t) => !queued.has(t.id));
+  if (!pool.length) return [];
+  const genre = current && current.genre && current.genre.toLowerCase();
+  const artist = current && (current.albumArtist || current.artist);
+  const scored = pool.map((t) => ({
+    id: t.id,
+    score: (genre && t.genre && t.genre.toLowerCase() === genre ? 2 : 0) +
+           (artist && (t.albumArtist || t.artist) === artist ? 1 : 0) +
+           Math.random(),
+  }));
+  scored.sort((a, b) => b.score - a.score);
+  return scored.slice(0, count).map((s) => s.id);
+}
+
 function next(auto = false) {
   if (!state.queue.length) return;
+  if (auto && sleepEndOfTrack) {
+    sleepEndOfTrack = false;
+    updateSleepUi();
+    audio.pause();
+    return;
+  }
   if (auto && state.repeat === 'one') { audio.currentTime = 0; audio.play(); return; }
   if (state.queuePos + 1 < state.queue.length) {
     state.queuePos++;
     playCurrent();
   } else if (state.repeat === 'all') {
     state.queuePos = 0;
+    playCurrent();
+  } else if (state.radio) {
+    const more = radioContinuation();
+    if (!more.length) { if (!auto) { state.queuePos = 0; playCurrent(); } return; }
+    state.queue.push(...more);
+    state.queuePos++;
     playCurrent();
   } else if (!auto) {
     state.queuePos = 0;
@@ -411,6 +445,73 @@ function render() {
   else if (v.name === 'album') renderAlbum(v.id);
   else if (v.name === 'artist') renderArtist(v.id);
   else if (v.name === 'playlist') renderPlaylist(v.id);
+  else if (v.name === 'category') renderCategory(v.id);
+}
+
+// ---- genre / tag browsing
+
+function categories() {
+  const byName = new Map();
+  for (const t of state.tracks.values()) {
+    const names = [];
+    if (t.genre && t.genre.trim()) names.push(t.genre.trim());
+    for (const tag of t.tags || []) names.push(tag);
+    for (const raw of names) {
+      const key = raw.toLowerCase();
+      let cat = byName.get(key);
+      if (!cat) { cat = { name: raw, trackIds: [] }; byName.set(key, cat); }
+      cat.trackIds.push(t.id);
+    }
+  }
+  return [...byName.values()].sort((a, b) => b.trackIds.length - a.trackIds.length || a.name.localeCompare(b.name));
+}
+
+function categoryHue(name) {
+  let hash = 0;
+  for (const ch of name.toLowerCase()) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
+  return hash % 360;
+}
+
+function categoryTracks(name) {
+  const key = name.toLowerCase();
+  return [...state.tracks.values()]
+    .filter((t) => (t.genre && t.genre.trim().toLowerCase() === key) || (t.tags || []).includes(key))
+    .sort((a, b) => a.artist.localeCompare(b.artist) || a.album.localeCompare(b.album) || (a.track - b.track))
+    .map((t) => t.id);
+}
+
+function categoryGrid() {
+  const cats = categories();
+  if (!cats.length) return '<div class="empty-note">No genres or tags yet — set them in the admin dashboard.</div>';
+  return `<div class="cat-grid">${cats.map((c) => `
+    <div class="cat-card" data-category="${esc(c.name)}" style="--h:${categoryHue(c.name)}">
+      <div class="cat-name">${esc(c.name)}</div>
+      <div class="cat-count">${c.trackIds.length} song${c.trackIds.length > 1 ? 's' : ''}</div>
+    </div>`).join('')}</div>`;
+}
+
+function bindCategoryCards() {
+  document.querySelectorAll('.cat-card').forEach((card) =>
+    card.addEventListener('click', () => setView({ name: 'category', id: card.dataset.category })));
+}
+
+function renderCategory(name) {
+  const ids = categoryTracks(name);
+  if (!ids.length) return setView({ name: 'search' });
+  const duration = ids.reduce((sum, id) => sum + (state.tracks.get(id).duration || 0), 0);
+  viewEl.innerHTML = `
+    <div class="detail-head">
+      <div class="cat-hero" style="--h:${categoryHue(name)}">${esc(name.charAt(0).toUpperCase())}</div>
+      <div>
+        <div class="dh-type">GENRE / TAG</div>
+        <h1>${esc(name)}</h1>
+        <div class="dh-sub">${ids.length} songs, ${fmtTime(duration)}</div>
+      </div>
+    </div>
+    <div class="detail-actions"><button class="big-play" id="detail-play">▶</button></div>
+    ${trackTable(ids)}`;
+  $('#detail-play').addEventListener('click', () => playQueue(ids, 0));
+  bindTrackTables();
 }
 
 async function renderHome() {
@@ -443,7 +544,12 @@ async function renderHome() {
 function renderSearch() {
   viewEl.innerHTML = `<div class="view-title">Search</div>
     <input id="search-input" type="search" placeholder="What do you want to listen to?" value="${esc(state.searchQuery)}">
-    <div id="search-results"></div>`;
+    <div id="search-results"></div>
+    <div id="search-browse">
+      <div class="section-title">Browse all</div>
+      ${categoryGrid()}
+    </div>`;
+  bindCategoryCards();
   const input = $('#search-input');
   input.focus();
   let timer;
@@ -458,6 +564,7 @@ function renderSearch() {
     const q = state.searchQuery.trim();
     const box = $('#search-results');
     if (!box) return;
+    $('#search-browse').hidden = !!q;
     if (!q) { box.innerHTML = ''; return; }
     const r = await api.get(`/api/search?q=${encodeURIComponent(q)}`);
     for (const t of r.tracks) if (!state.tracks.has(t.id)) state.tracks.set(t.id, t);
@@ -837,6 +944,76 @@ function syncTransportUi() {
     $(sel).classList.toggle('on', state.repeat !== 'off');
     $(sel).textContent = state.repeat === 'one' ? '🔂' : '🔁';
   });
+  ['#btn-radio', '#npf-radio'].forEach((sel) => $(sel).classList.toggle('on', state.radio));
+}
+
+function toggleRadio() {
+  state.radio = !state.radio;
+  syncTransportUi();
+  saveResume();
+}
+
+// ---- sleep timer
+
+let sleepTimer = null;
+let sleepEndOfTrack = false;
+let sleepAt = 0;
+
+function setSleep(minutes) {
+  clearTimeout(sleepTimer);
+  sleepTimer = null;
+  sleepEndOfTrack = false;
+  sleepAt = 0;
+  if (minutes === 'track') {
+    sleepEndOfTrack = true;
+  } else if (typeof minutes === 'number' && minutes > 0) {
+    sleepAt = Date.now() + minutes * 60000;
+    sleepTimer = setTimeout(fadeOutAndPause, minutes * 60000);
+  }
+  updateSleepUi();
+}
+
+function fadeOutAndPause() {
+  sleepTimer = null;
+  sleepAt = 0;
+  const startVol = audio.volume;
+  const steps = 30;
+  let step = 0;
+  const fade = setInterval(() => {
+    step++;
+    audio.volume = Math.max(0, startVol * (1 - step / steps));
+    if (step >= steps) {
+      clearInterval(fade);
+      audio.pause();
+      audio.volume = startVol;
+    }
+  }, 100);
+  updateSleepUi();
+}
+
+function updateSleepUi() {
+  const active = !!sleepTimer || sleepEndOfTrack;
+  ['#btn-sleep', '#npf-sleep'].forEach((sel) => {
+    const el = $(sel);
+    el.classList.toggle('on', active);
+    el.title = sleepEndOfTrack ? 'Sleep: after this song'
+      : sleepAt ? `Sleep at ${new Date(sleepAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+      : 'Sleep timer';
+  });
+}
+
+function openSleepMenu(x, y) {
+  const active = !!sleepTimer || sleepEndOfTrack;
+  const items = [15, 30, 45, 60].map((min) => ({
+    label: `🌙  In ${min} minutes`,
+    action: () => setSleep(min),
+  }));
+  items.push({ label: '🎵  After this song', action: () => setSleep('track') });
+  if (active) {
+    items.push({ sep: true });
+    items.push({ label: '✕  Turn off sleep timer', action: () => setSleep(0) });
+  }
+  showMenu(items, x, y);
 }
 
 function toggleShuffle() {
@@ -865,12 +1042,88 @@ $('#np-dl').addEventListener('click', () => {
   if (track) downloadTrack(track.id);
 });
 
+// ---- audio visualizer (Web Audio API)
+
+let audioCtx = null;
+let analyser = null;
+let vizEnabled = localStorage.getItem('viz') !== 'off';
+let vizFrame = null;
+
+function ensureAnalyser() {
+  if (audioCtx) return !!analyser;
+  try {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return false;
+    audioCtx = new Ctx();
+    const source = audioCtx.createMediaElementSource(audio);
+    analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 256;
+    analyser.smoothingTimeConstant = 0.82;
+    source.connect(analyser);
+    analyser.connect(audioCtx.destination);
+    // once routed through the context, audio only plays while it's running
+    audio.addEventListener('play', () => audioCtx.resume().catch(() => {}));
+    return true;
+  } catch {
+    analyser = null;
+    return false;
+  }
+}
+
+function startViz() {
+  if (!vizEnabled || vizFrame || !ensureAnalyser()) return;
+  if (audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
+  const canvas = $('#npf-viz');
+  const ctx2d = canvas.getContext('2d');
+  const bins = new Uint8Array(analyser.frequencyBinCount);
+  const draw = () => {
+    if ($('#np-full').hidden || !vizEnabled) { vizFrame = null; return; }
+    vizFrame = requestAnimationFrame(draw);
+    if (canvas.width !== canvas.clientWidth || canvas.height !== canvas.clientHeight) {
+      canvas.width = canvas.clientWidth;
+      canvas.height = canvas.clientHeight;
+    }
+    analyser.getByteFrequencyData(bins);
+    const { width, height } = canvas;
+    ctx2d.clearRect(0, 0, width, height);
+    const barCount = 64;
+    const barW = width / barCount;
+    for (let i = 0; i < barCount; i++) {
+      // logarithmic bin spread: most musical energy lives in the low bins
+      const lo = Math.floor(((i / barCount) ** 1.8) * bins.length * 0.75);
+      const hi = Math.max(lo + 1, Math.floor((((i + 1) / barCount) ** 1.8) * bins.length * 0.75));
+      let v = 0;
+      for (let b = lo; b < hi; b++) v = Math.max(v, bins[b]);
+      v /= 255;
+      const h = v * height * 0.5;
+      ctx2d.fillStyle = `hsla(141, 73%, ${28 + v * 32}%, ${0.25 + v * 0.3})`;
+      ctx2d.fillRect(i * barW + 1, height - h, barW - 2, h);
+    }
+  };
+  draw();
+}
+
+function stopViz() {
+  if (vizFrame) { cancelAnimationFrame(vizFrame); vizFrame = null; }
+}
+
+function toggleViz() {
+  vizEnabled = !vizEnabled;
+  localStorage.setItem('viz', vizEnabled ? 'on' : 'off');
+  $('#npf-viz-btn').classList.toggle('on', vizEnabled);
+  const canvas = $('#npf-viz');
+  if (vizEnabled) startViz();
+  else { stopViz(); canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height); }
+}
+
 // ---- full-screen now playing
 
 function openNpFull() {
   if (!currentTrack()) return;
   updateNpFull();
   $('#np-full').hidden = false;
+  $('#npf-viz-btn').classList.toggle('on', vizEnabled);
+  startViz();
 }
 
 function updateNpFull() {
@@ -888,7 +1141,20 @@ $('.now-playing').addEventListener('click', (e) => {
   if (e.target.closest('button')) return; // like/download keep their own actions
   openNpFull();
 });
-$('#npf-close').addEventListener('click', () => { $('#np-full').hidden = true; });
+$('#npf-close').addEventListener('click', () => { $('#np-full').hidden = true; stopViz(); });
+$('#npf-viz-btn').addEventListener('click', toggleViz);
+$('#btn-radio').addEventListener('click', toggleRadio);
+$('#npf-radio').addEventListener('click', toggleRadio);
+$('#btn-sleep').addEventListener('click', (e) => {
+  e.stopPropagation();
+  const r = e.target.getBoundingClientRect();
+  openSleepMenu(r.left, r.top - 8);
+});
+$('#npf-sleep').addEventListener('click', (e) => {
+  e.stopPropagation();
+  const r = e.target.getBoundingClientRect();
+  openSleepMenu(r.left, r.top - 8);
+});
 $('#npf-play').addEventListener('click', togglePlay);
 $('#npf-next').addEventListener('click', () => next(false));
 $('#npf-prev').addEventListener('click', prev);
