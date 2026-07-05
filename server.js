@@ -62,6 +62,7 @@ const MIME = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png',
   '.ico': 'image/x-icon', '.json': 'application/json',
+  '.webmanifest': 'application/manifest+json',
 };
 const AUDIO_MIME = {
   '.mp3': 'audio/mpeg', '.flac': 'audio/flac', '.ogg': 'audio/ogg', '.oga': 'audio/ogg',
@@ -127,8 +128,13 @@ function sessionCookie(req, token, maxAge) {
     (isSecure(req) ? '; Secure' : '');
 }
 
-// Paths reachable without a session (login page and its assets).
-const PUBLIC_PATHS = new Set(['/login', '/login.html', '/login.js', '/styles.css', '/api/auth/login', '/api/auth/me']);
+// Paths reachable without a session: the login page and its assets, plus the
+// PWA shell files that phones re-fetch in the background without cookies.
+const PUBLIC_PATHS = new Set([
+  '/login', '/login.html', '/login.js', '/styles.css',
+  '/api/auth/login', '/api/auth/me',
+  '/manifest.webmanifest', '/sw.js', '/icon-192.png', '/icon-512.png',
+]);
 
 // Returns the session (or null) and handles the response itself when access
 // is denied. Callers stop when it returns undefined.

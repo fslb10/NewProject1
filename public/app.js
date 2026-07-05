@@ -961,6 +961,10 @@ async function setupAuthUi() {
   } catch { /* redirecting to /login */ }
 }
 
+if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === '127.0.0.1' || location.hostname === 'localhost')) {
+  navigator.serviceWorker.register('/sw.js').catch(() => {});
+}
+
 (async function boot() {
   audio.volume = Number(localStorage.getItem('volume') || 80) / 100;
   $('#volume').value = audio.volume * 100;
