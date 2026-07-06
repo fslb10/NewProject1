@@ -38,6 +38,7 @@ async function loadTracks() {
   tracks = lib.tracks;
   $('#admin-stats').textContent =
     `${lib.tracks.length} tracks · ${lib.albums.length} albums · ${lib.artists.length} artists · folder: ${lib.musicDir}`;
+  refreshVocabulary();
   renderManager();
 }
 
@@ -61,8 +62,103 @@ function guessFields(file) {
 const FIELD_DEFS = [
   ['title', 'TITLE'], ['artist', 'ARTIST'], ['album', 'ALBUM'],
   ['track', '#'], ['year', 'YEAR'], ['genre', 'GENRE'],
-  ['tags', 'TAGS (comma-sep: spanish, workout…)'],
 ];
+
+// ---- tag / genre vocabulary (starter set + everything already in the library)
+
+const STARTER_TAGS = [
+  'english', 'spanish', 'french', 'portuguese', 'italian', 'german',
+  'hindi', 'arabic', 'korean', 'japanese', 'chinese',
+  'chill', 'workout', 'party', 'focus', 'sleep', 'roadtrip',
+  'romance', 'sad', 'happy', 'acoustic', 'instrumental', 'live', 'remix',
+];
+const STARTER_GENRES = [
+  'Pop', 'Rock', 'Hip-Hop', 'R&B', 'Electronic', 'House', 'Jazz', 'Classical',
+  'Country', 'Folk', 'Metal', 'Latin', 'Reggaeton', 'Reggae', 'Blues', 'Soul',
+  'Ambient', 'Soundtrack',
+];
+const knownTags = new Set(STARTER_TAGS);
+const knownGenres = new Set(STARTER_GENRES);
+
+function refreshVocabulary() {
+  for (const t of tracks) {
+    for (const tag of t.tags || []) knownTags.add(tag);
+    if (t.genre && t.genre.trim()) knownGenres.add(t.genre.trim());
+  }
+  const datalist = $('#genre-options');
+  datalist.innerHTML = [...knownGenres].sort()
+    .map((g) => `<option value="${esc(g)}"></option>`).join('');
+}
+
+// ---- lightweight popup menu (same look as the player's context menu)
+
+let menuEl = null;
+function closeMenu() { if (menuEl) { menuEl.remove(); menuEl = null; } }
+function showMenu(items, x, y) {
+  closeMenu();
+  menuEl = document.createElement('div');
+  menuEl.className = 'ctx-menu';
+  for (const item of items) {
+    const btn = document.createElement('button');
+    btn.textContent = item.label;
+    btn.addEventListener('click', (e) => { e.stopPropagation(); closeMenu(); item.action(); });
+    menuEl.appendChild(btn);
+  }
+  document.body.appendChild(menuEl);
+  const rect = menuEl.getBoundingClientRect();
+  menuEl.style.left = Math.max(8, Math.min(x, innerWidth - rect.width - 8)) + 'px';
+  menuEl.style.top = Math.max(8, Math.min(y, innerHeight - rect.height - 8)) + 'px';
+}
+document.addEventListener('click', (e) => { if (menuEl && !menuEl.contains(e.target)) closeMenu(); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMenu(); });
+
+// ---- chip-based tag picker; reads/writes fields.tags as a comma string
+
+function tagChipControl(container, fields, disabled) {
+  const selected = () => (fields.tags || '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
+  const render = () => {
+    container.innerHTML = '';
+    const current = selected();
+    for (const tag of current) {
+      const chip = document.createElement('span');
+      chip.className = 'tag-chip';
+      chip.innerHTML = `${esc(tag)}${disabled ? '' : ' <button title="Remove">✕</button>'}`;
+      if (!disabled) {
+        chip.querySelector('button').addEventListener('click', () => {
+          fields.tags = current.filter((t) => t !== tag).join(', ');
+          render();
+        });
+      }
+      container.appendChild(chip);
+    }
+    if (!disabled) {
+      const add = document.createElement('button');
+      add.type = 'button';
+      add.className = 'tag-add';
+      add.textContent = '＋ tag';
+      add.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const current = selected();
+        const options = [...knownTags].filter((t) => !current.includes(t)).sort()
+          .map((t) => ({ label: t, action: () => { fields.tags = [...current, t].join(', '); render(); } }));
+        options.push({
+          label: '＋ New tag…',
+          action: () => {
+            const tag = (prompt('New tag (e.g. spanish, workout):') || '').trim().toLowerCase();
+            if (!tag) return;
+            knownTags.add(tag);
+            if (!current.includes(tag)) fields.tags = [...current, tag].join(', ');
+            render();
+          },
+        });
+        const r = add.getBoundingClientRect();
+        showMenu(options, r.left, r.bottom + 4);
+      });
+      container.appendChild(add);
+    }
+  };
+  render();
+}
 
 function addFiles(files) {
   for (const file of files) {
@@ -93,17 +189,30 @@ function renderQueue() {
       <div class="up-file">
         <span class="up-name">${item.status === 'done' ? '✅ ' : '🎵 '}${esc(item.file.name)}</span>
         <span class="up-size">${fmtSize(item.file.size)}</span>
+        ${uploadQueue.length > 1 && item.status === 'pending' ? '<button class="up-copy-all" title="Copy artist, album, year, genre and tags to every file below">⇊ apply to all</button>' : ''}
         <button class="up-remove" title="Remove">✕</button>
       </div>
       <div class="up-fields">
         ${FIELD_DEFS.map(([key, label]) => `
           <span><span class="field-label">${label}</span>
-          <input data-field="${key}" value="${esc(item.fields[key])}" placeholder="${label.toLowerCase()}" ${item.status !== 'pending' ? 'disabled' : ''}></span>`).join('')}
+          <input data-field="${key}" ${key === 'genre' ? 'list="genre-options"' : ''} value="${esc(item.fields[key])}" placeholder="${label.toLowerCase()}" ${item.status !== 'pending' ? 'disabled' : ''}></span>`).join('')}
       </div>
+      <div class="tag-row"><span class="field-label">TAGS</span><span class="tag-chips"></span></div>
       <div class="up-progress"><div></div></div>
       <div class="up-error" hidden></div>`;
     row.querySelectorAll('input[data-field]').forEach((input) =>
       input.addEventListener('input', () => { item.fields[input.dataset.field] = input.value; }));
+    tagChipControl(row.querySelector('.tag-chips'), item.fields, item.status !== 'pending');
+    const copyAll = row.querySelector('.up-copy-all');
+    if (copyAll) {
+      copyAll.addEventListener('click', () => {
+        for (const other of uploadQueue) {
+          if (other === item || other.status !== 'pending') continue;
+          for (const key of ['artist', 'album', 'year', 'genre', 'tags']) other.fields[key] = item.fields[key];
+        }
+        renderQueue();
+      });
+    }
     row.querySelector('.up-remove').addEventListener('click', () => {
       uploadQueue.splice(idx, 1);
       renderQueue();
@@ -120,7 +229,7 @@ function renderQueue() {
 function uploadOne(item) {
   return new Promise((resolve) => {
     const params = new URLSearchParams({ filename: item.file.name });
-    for (const [key] of FIELD_DEFS) {
+    for (const key of [...FIELD_DEFS.map(([k]) => k), 'tags']) {
       if (item.fields[key] && item.fields[key].trim()) params.set(key, item.fields[key].trim());
     }
     const xhr = new XMLHttpRequest(); // XHR for upload progress events
@@ -311,17 +420,19 @@ function openEditor(t, row) {
   editor.innerHTML = `
     ${FIELD_DEFS.map(([key, label]) => `
       <span><span class="field-label">${label}</span>
-      <input data-field="${key}" value="${esc(values[key])}"></span>`).join('')}
+      <input data-field="${key}" ${key === 'genre' ? 'list="genre-options"' : ''} value="${esc(values[key])}"></span>`).join('')}
+    <div class="tag-row"><span class="field-label">TAGS</span><span class="tag-chips"></span></div>
     <div class="tm-edit-actions">
       <button class="accent-btn" data-act="save">Save</button>
       <button class="ghost-btn" data-act="cancel">Cancel</button>
     </div>`;
+  tagChipControl(editor.querySelector('.tag-chips'), values, false);
   editor.querySelector('[data-act="cancel"]').addEventListener('click', () => {
     editor.remove();
     editingId = null;
   });
   editor.querySelector('[data-act="save"]').addEventListener('click', async () => {
-    const fields = {};
+    const fields = { tags: values.tags || '' };
     editor.querySelectorAll('input[data-field]').forEach((input) => { fields[input.dataset.field] = input.value; });
     try {
       await apiJson('PATCH', `/api/admin/tracks/${t.id}`, fields);
